@@ -61,6 +61,28 @@ def main():
     blank = [r for r in county if r["縣市"] == "新北市" and int(r["年"]) == 113]
     assert blank[0]["死亡數"] == "", "113 新北市死亡數應留空(來源缺板橋區),不應給加總值"
 
+    # 年齡結構(ODRP014)跟年底人口(ODRP048)是兩支不同的資料集,三段年齡合計
+    # 必須等於年底人口 —— 對不上就是年齡分段漏了某些歲數,或彙總層級錯了。
+    for year in range(109, 114):
+        segments = sum(total(county, year, f) for f in ["0_14歲人口", "15_64歲人口", "65歲以上人口"])
+        pop = total(county, year, "年底人口")
+        assert segments == pop, f"{year} 年齡三段合計 {segments:,.0f} != 年底人口 {pop:,.0f}"
+
+    # 40-64 歲是 15-64 歲的子集,不是獨立一段(加進總數會重複計算)
+    for r in town:
+        if r["40_64歲人口"] and r["15_64歲人口"]:
+            assert float(r["40_64歲人口"]) <= float(r["15_64歲人口"]), \
+                f'{r["年"]} {r["縣市"]}{r["鄉鎮市區"]}:40-64 歲人口大於 15-64 歲'
+
+    # 占比要用年齡資料自己的三段合計當分母,不能混用 年底人口
+    for r in town:
+        if not r["65歲以上占比"]:
+            continue
+        age_total = sum(float(r[f]) for f in ["0_14歲人口", "15_64歲人口", "65歲以上人口"])
+        expected = round(float(r["65歲以上人口"]) / age_total * 100, 2)
+        assert abs(float(r["65歲以上占比"]) - expected) < 0.02, \
+            f'{r["年"]} {r["縣市"]}{r["鄉鎮市區"]}:65 歲以上占比對不上重算值'
+
     # 沒有據點的縣市,通訊處數是真實的 0 而不是缺值
     matsu = [r for r in county if r["縣市"] == "連江縣"]
     assert all(r["累計通訊處數"] == "0" for r in matsu), "連江縣沒有通訊處,應為 0 而非空值"

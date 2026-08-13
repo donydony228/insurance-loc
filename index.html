@@ -288,13 +288,21 @@ const FIELD_META = {
   '死亡數':              { label: '死亡數(當年)', unit: ' 人', dec: 0, group: '生育與死亡' },
   '粗死亡率_千分比':     { label: '粗死亡率(‰)', unit: '‰', dec: 2, group: '生育與死亡' },
   '自然增加率_千分比':   { label: '自然增加率(‰)', unit: '‰', dec: 2, group: '生育與死亡' },
+  '0_14歲人口':          { label: '0–14 歲人口', unit: ' 人', dec: 0, group: '年齡結構' },
+  '15_64歲人口':         { label: '15–64 歲人口', unit: ' 人', dec: 0, group: '年齡結構' },
+  '40_64歲人口':         { label: '40–64 歲人口(壽險主力客群)', unit: ' 人', dec: 0, group: '年齡結構' },
+  '65歲以上人口':        { label: '65 歲以上人口', unit: ' 人', dec: 0, group: '年齡結構' },
+  '40_64歲占比':         { label: '40–64 歲占比(%)', unit: '%', dec: 2, group: '年齡結構' },
+  '65歲以上占比':        { label: '65 歲以上占比(%)', unit: '%', dec: 2, group: '年齡結構' },
+  '老化指數':            { label: '老化指數(65+ ÷ 0–14 ×100)', unit: '', dec: 1, group: '年齡結構' },
+  '扶養比':              { label: '扶養比(%)', unit: '%', dec: 2, group: '年齡結構' },
   '納稅單位_戶':         { label: '綜所稅納稅單位(戶)', unit: ' 戶', dec: 0, group: '所得與消費' },
   '綜合所得總額_千元':   { label: '綜合所得總額(千元)', unit: ' 千元', dec: 0, group: '所得與消費' },
   '綜合所得平均數_千元': { label: '綜合所得平均數(千元)', unit: ' 千元', dec: 1, group: '所得與消費' },
   '綜合所得中位數_千元': { label: '綜合所得中位數(千元,僅鄉鎮市區層級)', unit: ' 千元', dec: 1, group: '所得與消費' },
   '平均每戶消費支出_元': { label: '平均每戶消費支出(元,縣市值)', unit: ' 元', dec: 0, group: '所得與消費' },
 };
-const GROUP_ORDER = ['通訊處', '人口規模', '生育與死亡', '所得與消費'];
+const GROUP_ORDER = ['通訊處', '人口規模', '年齡結構', '生育與死亡', '所得與消費'];
 
 const panels = {};        // level -> {rows, fields}
 let currentRows = [];

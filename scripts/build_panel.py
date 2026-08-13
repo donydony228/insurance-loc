@@ -13,6 +13,7 @@
   戶政司 ODRP055/{yyy}  嬰兒出生數(按登記)  → 出生數                        民國 109-113
   戶政司 ODRP031/{yyy}  人口死亡數          → 死亡數                        民國 109-113
   戶政司 ODRP019/{yyy}  戶數、人口數按戶別   → 戶數                          民國 109-113
+  戶政司 ODRP014/{yyy}12 村里單一年齡人口     → 年齡結構                      民國 109-113
   財政部 {yyy}_165-9.csv 綜稅所得統計        → 納稅單位、所得總額、平均/中位數 民國 109-112
   data/income/縣市_平均消費支出.csv           → 平均每戶消費支出(縣市)        民國 87-113
   data/通訊處/鄉鎮市區_通訊處_歷年設立數.csv   → 新增/累計通訊處數              不限
@@ -72,11 +73,13 @@ RIS_YEARS = range(109, 114)           # 戶政司實際有資料的年份
 FIA_YEARS = range(109, 113)           # 財政部實際有資料的年份(113 尚未發布)
 
 # 計數型欄位:縣市層級直接加總。比率型欄位不列在這裡,一律重算(見 derive_rates)。
+# 40_64歲人口 是 15_64歲人口 的子集,算總人口時不能把它一起加進去。
 COUNT_FIELDS = [
     "新增通訊處數", "累計通訊處數",
     "年底人口", "土地面積_km2",
     "出生數", "死亡數", "戶數",
     "納稅單位_戶", "綜合所得總額_千元",
+    "0_14歲人口", "15_64歲人口", "40_64歲人口", "65歲以上人口",
 ]
 # 縣市層級無法從鄉鎮市區合併、且來源沒有縣市合計列的欄位
 COUNTY_UNAVAILABLE = ["綜合所得中位數_千元"]
@@ -84,6 +87,7 @@ COUNTY_UNAVAILABLE = ["綜合所得中位數_千元"]
 COLUMNS = COUNT_FIELDS + [
     "人口密度_人每km2", "平均戶量",
     "粗出生率_千分比", "粗死亡率_千分比", "自然增加率_千分比",
+    "40_64歲占比", "65歲以上占比", "老化指數", "扶養比",
     "綜合所得平均數_千元", "綜合所得中位數_千元",
     "平均每戶消費支出_元",
     "每萬人通訊處數",
@@ -267,6 +271,43 @@ def collect_households(cells, site_index, unmatched):
             cells.setdefault((yyy, *site), {})["戶數"] = total
 
 
+def collect_age_structure(cells, site_index, unmatched):
+    """ODRP014 各年 12 月:村里級單一年齡人口(0~99 + 100up,分男女),彙總成四個年齡段。
+
+    這支是月資料(yyymm),但每年的 12 月都還查得到 —— 不像 ODRP011/012 那樣只留約 18 個月
+    的滾動窗口(見 step3_growth_migration.py 的註解)。這點很關鍵:年度年齡結構的另一個來源
+    ODRP052 是村里 x 單一年齡 x 性別 x 婚姻,每年 206 萬列 / 1031 頁,實測 4.1 秒/頁,
+    抓五年要六小時;ODRP014 是寬表,每年只有 4 頁,同樣的資料 20 頁就抓完。
+
+    40_64歲人口 是 15_64歲人口 的子集(主力壽險客群),不是獨立的一段,總人口只能用
+    0_14 + 15_64 + 65up 三段相加。
+    """
+    for yyy in RIS_YEARS:
+        agg = {}
+        for r in fetch_ris("ODRP014", f"{yyy}12"):
+            site = site_index.get(normalize(r["site_id"]))
+            if site is None:
+                unmatched.add(r["site_id"])
+                continue
+            bucket = agg.setdefault(site, {"0_14歲人口": 0, "15_64歲人口": 0,
+                                           "40_64歲人口": 0, "65歲以上人口": 0})
+            for age in range(101):
+                key = "people_age_100up" if age == 100 else f"people_age_{age:03d}"
+                n = (to_int(r.get(key + "_m")) or 0) + (to_int(r.get(key + "_f")) or 0)
+                if not n:
+                    continue
+                if age < 15:
+                    bucket["0_14歲人口"] += n
+                elif age < 65:
+                    bucket["15_64歲人口"] += n
+                    if age >= 40:
+                        bucket["40_64歲人口"] += n
+                else:
+                    bucket["65歲以上人口"] += n
+        for site, bucket in agg.items():
+            cells.setdefault((yyy, *site), {}).update(bucket)
+
+
 def collect_income(cells, site_index, unmatched):
     """財政部 165-9:村里級檔案,取政府算好的「村里=合計」列當鄉鎮市區值。
 
@@ -321,6 +362,16 @@ def derive_rates(cell):
         div(births - deaths, pop, 1000) if births is not None and deaths is not None else None
     )
     cell["每萬人通訊處數"] = div(cell.get("累計通訊處數"), pop, 10000)
+
+    # 年齡結構的分母用年齡資料自己的三段合計,不用 年底人口(ODRP048)——
+    # 兩者來源不同、時點也差一點,混用會讓占比加起來不等於 100%。
+    young, working, old = (cell.get("0_14歲人口"), cell.get("15_64歲人口"), cell.get("65歲以上人口"))
+    if None not in (young, working, old):
+        age_total = young + working + old
+        cell["40_64歲占比"] = div(cell.get("40_64歲人口"), age_total, 100)
+        cell["65歲以上占比"] = div(old, age_total, 100)
+        cell["老化指數"] = div(old, young, 100, decimals=1)
+        cell["扶養比"] = div(young + old, working, 100)
 
 
 def aggregate_county(town_cells, fia_other):
@@ -418,6 +469,8 @@ def main():
     collect_deaths(town_cells, site_index, unmatched)
     print("下載 ODRP019 戶數...")
     collect_households(town_cells, site_index, unmatched)
+    print("下載 ODRP014 年齡結構(各年 12 月)...")
+    collect_age_structure(town_cells, site_index, unmatched)
     print("下載財政部綜稅所得統計...")
     collect_income(town_cells, site_index, unmatched)
     fia_other = collect_fia_other(site_index)
