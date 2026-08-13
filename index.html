@@ -125,6 +125,26 @@
 
   details { margin-top: 8px; }
   summary { cursor: pointer; font-size: 14px; color: var(--text-secondary); }
+  .guide { margin-top: 20px; border-top: 1px solid var(--border); padding-top: 14px; }
+  .guide-body { max-width: 78ch; font-size: 14px; color: var(--text-secondary); }
+  .guide-body p { margin: 12px 0; }
+  .guide-body strong { color: var(--text-primary); font-weight: 600; }
+  .guide-head {
+    font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--text-muted); margin: 22px 0 8px !important;
+  }
+  .guide-table { margin: 4px 0 0; font-size: 14px; }
+  .guide-table th, .guide-table td {
+    text-align: left; vertical-align: baseline; padding: 8px 0;
+    white-space: normal; border-bottom: 1px solid var(--border);
+  }
+  .guide-table th {
+    position: static; background: none; text-transform: none; letter-spacing: 0;
+    font-size: 14px; color: var(--text-primary); font-weight: 600;
+    width: 108px; padding-right: 16px;
+  }
+  .guide-list { margin: 0; padding-left: 20px; display: grid; gap: 8px; }
+  .guide-list li { line-height: 1.6; }
   .table-holder { overflow-x: auto; max-height: 420px; margin-top: 12px; }
   table { border-collapse: collapse; width: 100%; font-size: 13px; }
   th, td { text-align: right; padding: 6px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
@@ -179,9 +199,14 @@
       <div class="stat-note" id="pearsonNote"></div>
     </div>
     <div>
+      <div class="stat-label">r²(解釋的變異)</div>
+      <div class="stat-value" id="rsq">—</div>
+      <div class="stat-note" id="rsqNote">r 會讓人高估關係強度,r² 才是誠實的版本</div>
+    </div>
+    <div>
       <div class="stat-label">斯皮爾曼 ρ(等級相關)</div>
       <div class="stat-value" id="spearman">—</div>
-      <div class="stat-note">對離群值與偏態不敏感,跟 r 差很多代表關係不是線性的</div>
+      <div class="stat-note" id="spearmanNote">對離群值與偏態不敏感,跟 r 差很多代表關係不是線性的</div>
     </div>
     <div>
       <div class="stat-label">樣本數 n</div>
@@ -190,6 +215,40 @@
     </div>
   </div>
   <ul class="notes" id="notes"></ul>
+
+  <details class="guide">
+    <summary>怎麼看這些數字?</summary>
+    <div class="guide-body">
+      <p><strong>r 講關係有多大,p 講這個 r 可不可能只是巧合 —— 兩者互相獨立。</strong>
+      「顯著」不代表關係強,也不代表重要。</p>
+
+      <table class="guide-table">
+        <tbody>
+          <tr><th>皮爾森 r</th><td>關係的方向與強度,−1 到 +1。正號是同方向,負號是反方向。<strong>只測直線關係</strong>。</td></tr>
+          <tr><th>r²</th><td>r 的平方 —— X 能解釋 Y 多少比例的變異。r=0.3 看起來還可以,r² 只有 0.09,也就是 9%,剩下 91% 是別的因素。</td></tr>
+          <tr><th>斯皮爾曼 ρ</th><td>把數值換成名次再算,所以離群值影響不到它。<strong>跟 r 差 0.2 以上就是紅燈</strong>:代表關係要嘛不是直線的,要嘛是被少數幾個極端點撐起來的。</td></tr>
+          <tr><th>p 值</th><td>假設兩者其實毫無關係,純靠隨機也看到這麼強相關的機率。p=0.42 代表就算沒關係也有 42% 機會長這樣,沒有說服力;p&lt;0.001 代表不太可能是巧合。</td></tr>
+          <tr><th>臨界 |r|</th><td>p 值的白話版:以目前的 n,r 至少要多大才值得當一回事。這個門檻完全由 n 決定,跟資料內容無關。</td></tr>
+        </tbody>
+      </table>
+
+      <p class="guide-head">判讀順序</p>
+      <ol class="guide-list">
+        <li><strong>先看 n。</strong> 少於 10 筆就不用談顯著性了。n=5 時臨界 |r| 高達 0.88,再真的關係也測不出來;n=1840 時臨界值只有 0.05,幾乎什麼都會「顯著」,這時 p 值已經沒有資訊量。</li>
+        <li><strong>比對 r 跟 ρ。</strong> 兩個接近 → r 可信。差很多 → 先別下結論,往下一步。</li>
+        <li><strong>看散佈圖。</strong> 是一片雲,還是幾個離群點把迴歸線拉過去?後者的話,結論只適用那幾個點,不適用整體。</li>
+        <li><strong>看 r²。</strong> 到底解釋了多少?這是判斷「有沒有實務意義」的數字,不是 p。</li>
+        <li><strong>最後才看 p。</strong> 而且只在 n 不大不小的時候才真的有用。</li>
+      </ol>
+
+      <p class="guide-head">三個常見誤讀</p>
+      <ul class="guide-list">
+        <li><strong>相關不是因果。</strong> 通訊處數與人口高度相關,不是「開通訊處讓人變多」,是保險公司本來就往人多的地方開 —— 因果方向是反的。</li>
+        <li><strong>高相關可能只是「都很大」。</strong> 大縣市人口多、出生數多、通訊處多、所得總額也多,任兩個算都會高相關,但那是規模不是關係。X/Y 至少要有一個是率型指標。</li>
+        <li><strong>不顯著不等於沒關係。</strong> 只代表這份資料看不出來,常常是樣本數不夠而已。</li>
+      </ul>
+    </div>
+  </details>
 </div>
 
 <div class="card">
@@ -553,7 +612,8 @@ async function update() {
   // 鄉鎮市區面板要抓 600KB 以上,網路慢的時候會有一段空窗。這段期間不能繼續show
   // 上一個層級的數字 —— 標籤已經寫著「鄉鎮市區」但數字還是縣市的,比空白誤導得多。
   if (!panels[level]) {
-    $('pearson').textContent = $('spearman').textContent = $('sampleN').textContent = '…';
+    $('pearson').textContent = $('spearman').textContent =
+      $('sampleN').textContent = $('rsq').textContent = '…';
     $('pearsonNote').textContent = '';
     $('sampleNote').textContent = '資料載入中…';
     $('notes').textContent = '';
@@ -603,6 +663,18 @@ async function update() {
   $('pearson').textContent = r === null ? '—' : r.toFixed(3);
   $('spearman').textContent = rho === null ? '—' : rho.toFixed(3);
   $('sampleN').textContent = n;
+  $('rsq').textContent = r === null ? '—' : (r * r).toFixed(3);
+  $('rsqNote').textContent = r === null
+    ? 'r 會讓人高估關係強度,r² 才是誠實的版本'
+    : `X 解釋了 Y 約 ${(r * r * 100).toFixed(1)}% 的變異,其餘 ${(100 - r * r * 100).toFixed(1)}% 是別的因素`;
+
+  // r 跟 ρ 差很多時直接把紅燈講出來,不要指望使用者自己比對兩個數字
+  if (r !== null && rho !== null && Math.abs(r - rho) >= 0.2) {
+    $('spearmanNote').textContent =
+      `跟 r 差 ${Math.abs(r - rho).toFixed(2)} —— 關係可能不是直線的,或被少數極端點撐起來,請先看散佈圖再下結論`;
+  } else {
+    $('spearmanNote').textContent = '對離群值與偏態不敏感,跟 r 差很多代表關係不是線性的';
+  }
 
   if (r === null) {
     $('pearsonNote').textContent = n < 3 ? '有效資料點不足 3 筆' : '其中一個指標在這個範圍內沒有變異';
