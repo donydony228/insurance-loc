@@ -544,15 +544,33 @@ function renderNotes(points, panel, diff, yearFilter, regionFilter) {
   $('notes').innerHTML = notes.map(t => `<li>${t}</li>`).join('');
 }
 
+let updateToken = 0;
+
 async function update() {
   const level = $('level').value;
+  const token = ++updateToken;
+
+  // 鄉鎮市區面板要抓 600KB 以上,網路慢的時候會有一段空窗。這段期間不能繼續show
+  // 上一個層級的數字 —— 標籤已經寫著「鄉鎮市區」但數字還是縣市的,比空白誤導得多。
+  if (!panels[level]) {
+    $('pearson').textContent = $('spearman').textContent = $('sampleN').textContent = '…';
+    $('pearsonNote').textContent = '';
+    $('sampleNote').textContent = '資料載入中…';
+    $('notes').textContent = '';
+  }
+
   let panel;
   try {
     panel = await loadPanel(level);
   } catch (err) {
-    $('pearsonNote').textContent = err.message + '(本頁需要透過網頁伺服器開啟,直接用 file:// 開會被瀏覽器擋掉)';
+    if (token !== updateToken) return;
+    $('sampleNote').textContent = '';
+    $('pearsonNote').textContent = err.message +
+      '(本頁需要透過網頁伺服器開啟,直接用 file:// 開會被瀏覽器擋掉)';
     return;
   }
+  // 等待期間使用者又改了選擇,這次的結果已經過期,交給後來那次去畫
+  if (token !== updateToken) return;
 
   // 換層級時保留使用者已選的欄位;中位數只有鄉鎮市區層級有,換到縣市會自動落回第一個選項
   buildFieldSelect($('xField'), panel.fields, $('xField').value || '新增通訊處數');
