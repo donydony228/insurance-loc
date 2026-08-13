@@ -20,6 +20,22 @@ AND 組合,欄位涵蓋所有量級指標、原始數量(人口數/戶數/通訊
 但大幅淡出,側欄同時列出符合清單(按每萬人通訊處數由小到大排,點列表項目會飛到該鄉鎮市區)。
 這個功能對應 TODO 最後一項「標出候選白地鄉鎮市區」,做成互動篩選比固定排序清單更彈性
 (門檻可以隨時調)。
+
+「客戶實績」這組指標來自 clean_customer_data.py + dashboard_build_layer.py 新接的當月客戶保費
+明細(保戶數用 性別+年齡+3碼郵遞區號 去重近似):每萬人保戶數、保戶滲透率、客單價是量級型,
+延用 sequential 藍色漸層;主力通路(該區保費收入最高的通路)是類別欄位,不能套連續色階,
+改用固定類別色——只挑 dataviz skill categorical palette 的前 3 個色階(blue/orange/aqua),
+因為那是唯一通過 all-pairs CVD 驗證的組合(4 階以上 all-pairs 會 fail,palette.md 有記載),
+AG/BR/BA 三個主力通路各佔一色,量少的 EC/FS 併成「其他」用單獨的中性灰(不計入類別色驗證,
+跟 NO_DATA_COLOR 是同一種處理方式)。主力通路目前不放進複合篩選欄位,因為篩選框架只吃數值
+比較(>=/<=/=),類別欄位硬塞進去意義不大。
+
+「排除投資型保單」checkbox:投資型(變額壽險,ptype3 開頭 U)金額波動遠大於其他商品
+(標準差全商品類型最大),混在一起會拉歪客單價這類平均值指標。dashboard_build_layer.py
+已經把 5 個客戶實績欄位(保戶數/每萬人保戶數/保戶滲透率/總保費收入/客單價/主力通路/
+主力通路占比/通路別保費)各算了「全部商品」和「_不含投資型」兩份存進 GeoJSON properties,
+checkbox 打勾時前端一律改讀後綴版本(custField() 集中處理),圖層著色、複合篩選、tooltip
+三處都會跟著切換,不用重新載入資料。
 """
 
 import os
@@ -38,6 +54,11 @@ CSS_BLOCK = """
   }
   .metric-select optgroup { color: var(--text-dim); font-style: normal; font-weight: 600; }
   .metric-select option { color: var(--text); font-weight: 400; }
+  .toggle-row {
+    display: flex; align-items: flex-start; gap: 6px; font-size: 12px; color: var(--text-dim);
+    line-height: 1.4; margin-bottom: 10px; cursor: pointer;
+  }
+  .toggle-row input { margin-top: 2px; flex-shrink: 0; }
   #district-legend { font-size: 11.5px; color: var(--text-dim); margin-bottom: 4px; }
   #district-legend .legend-title { color: var(--text); font-weight: 600; margin-bottom: 6px; font-size: 12.5px; }
   #district-legend .legend-row { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; }
@@ -88,6 +109,10 @@ HTML_BLOCK = """
     <!-- DISTRICT_LAYER_HTML_START -->
     <div class="section-title">行政區指標圖層</div>
     <select id="metricSelect" class="metric-select"></select>
+    <label class="toggle-row">
+      <input type="checkbox" id="excludeInvestmentToggle">
+      排除投資型保單(變額壽險，金額波動大，會拉歪客單價等平均值指標)
+    </label>
     <div id="district-legend"></div>
 
     <div class="section-title">複合篩選(白地候選)</div>
@@ -118,6 +143,10 @@ const METRICS = [
   {{ id: '所得中位數', label: '綜合所得中位數(每申報戶，千元)', unit: ' 千元', decimals: 0, group: '所得與消費' }},
   {{ id: '平均消費支出', label: '平均每戶消費支出(縣市退回值，元)', unit: ' 元', decimals: 0, group: '所得與消費' }},
   {{ id: '每萬人通訊處數', label: '每萬人通訊處數(6家合計，數字低＝相對白地)', unit: '', decimals: 2, group: '競爭/供給' }},
+  {{ id: '每萬人保戶數', label: '每萬人保戶數(當月，人數近似值)', unit: '', decimals: 2, group: '客戶實績' }},
+  {{ id: '保戶滲透率', label: '保戶滲透率(保戶數/人口數)', unit: '%', decimals: 3, group: '客戶實績' }},
+  {{ id: '客單價', label: '客單價(每保戶當月保費，元)', unit: ' 元', decimals: 0, group: '客戶實績' }},
+  {{ id: '主力通路', label: '主力通路(當月保費收入最高的通路)', group: '客戶實績', categorical: true }},
 ];
 
 // 複合篩選(白地候選)用的欄位清單,比 METRICS 更廣 —— 包含原始數量(人口數/戶數/通訊處數)
@@ -141,6 +170,11 @@ const FILTER_FIELDS = [
   {{ id: '平均消費支出', label: '平均每戶消費支出(縣市退回值)', unit: ' 元', decimals: 0, group: '所得與消費' }},
   {{ id: '通訊處數', label: '通訊處數(6家合計)', unit: '', decimals: 0, group: '競爭/供給' }},
   {{ id: '每萬人通訊處數', label: '每萬人通訊處數', unit: '', decimals: 2, group: '競爭/供給' }},
+  {{ id: '保戶數', label: '保戶數(當月，人數近似值)', unit: '', decimals: 0, group: '客戶實績' }},
+  {{ id: '每萬人保戶數', label: '每萬人保戶數', unit: '', decimals: 2, group: '客戶實績' }},
+  {{ id: '保戶滲透率', label: '保戶滲透率', unit: '%', decimals: 3, group: '客戶實績' }},
+  {{ id: '總保費收入', label: '總保費收入(當月，元)', unit: ' 元', decimals: 0, group: '客戶實績' }},
+  {{ id: '客單價', label: '客單價(元)', unit: ' 元', decimals: 0, group: '客戶實績' }},
 ];
 const FILTER_COMPANIES = Array.from(new Set(
   DISTRICT_LAYER.features.flatMap(f => Object.keys(f.properties['通訊處數_by公司'] || {{}}))
@@ -160,6 +194,34 @@ const SEQUENTIAL_COLORS = ['#cde2fb', '#9ec5f4', '#6da7ec', '#3987e5', '#256abf'
 // 專用的預期行為,六項檢查是給 categorical 識別色用的,不適用在這裡)。
 const DIVERGING_COLORS = ['#7e0000', '#c1252c', '#ff6964', '#f0efec', '#6da7ec', '#256abf', '#0d366b'];
 const NO_DATA_COLOR = '#c3c2b7';
+
+// 主力通路是類別欄位,用固定色而非漸層。只取 dataviz skill categorical palette 的前 3 色
+// (blue/orange/aqua)——這是唯一通過 all-pairs CVD 驗證的子集(見本檔開頭註解),AG/BR/BA
+// 三個主要通路各佔一色;EC/FS 量少併成「其他」,用單獨的中性灰(不算進類別色驗證範圍,
+// 跟 NO_DATA_COLOR 是同一種處理方式,只是換一個灰階以跟「無資料」區分開)。
+const CHANNEL_COLORS = {{ 'AG': '#2a78d6', 'BR': '#eb6834', 'BA': '#1baf7a' }};
+const CHANNEL_LABELS = {{ 'AG': '業務員(AG)', 'BR': '銀行保代(BR)', 'BA': '銀保(BA)' }};
+const OTHER_CHANNEL_COLOR = '#6b6a63';
+const OTHER_CHANNEL_LABEL = '其他(EC/FS)';
+
+function channelColor(channel) {{
+  return CHANNEL_COLORS[channel] || (channel ? OTHER_CHANNEL_COLOR : NO_DATA_COLOR);
+}}
+
+function channelLabel(channel) {{
+  if (!channel) return '無資料';
+  return CHANNEL_LABELS[channel] || OTHER_CHANNEL_LABEL;
+}}
+
+// 客戶實績欄位在 dashboard_build_layer.py 同時算了「全部商品」和「_不含投資型」兩份,
+// 排除投資型 checkbox 打勾時,圖層著色/篩選/tooltip 一律改讀後綴版本,其他非客戶欄位
+// (人口、通訊處等)不受這個開關影響,custField() 只對客戶欄位 id 做後綴替換。
+const CUSTOMER_FIELD_IDS = new Set(['保戶數', '每萬人保戶數', '保戶滲透率', '總保費收入', '客單價', '主力通路', '主力通路占比', '通路別保費']);
+let excludeInvestment = false;
+function custField(props, fieldId) {{
+  const resolved = (excludeInvestment && CUSTOMER_FIELD_IDS.has(fieldId)) ? fieldId + '_不含投資型' : fieldId;
+  return props[resolved];
+}}
 
 function quantileBreaks(values) {{
   const v = values.filter(x => x != null && !Number.isNaN(x)).sort((a, b) => a - b);
@@ -208,7 +270,11 @@ const districtLayer = L.geoJSON(DISTRICT_LAYER, {{
   onEachFeature: (feature, layer) => {{
     const p = feature.properties;
     const companies = Object.entries(p['通訊處數_by公司'] || {{}}).map(([k, v]) => `${{escapeHtml(k)}} ${{v}}`).join('、') || '無';
-    layer.bindTooltip(`
+    // 內容用 function 而不是字串:排除投資型 checkbox 打勾時要重算,tooltip 每次打開才會讀到
+    // 當下的 excludeInvestment 狀態,不用整份圖層重建。
+    layer.bindTooltip(() => {{
+      const 主力通路占比 = custField(p, '主力通路占比');
+      return `
       <div class="district-tooltip">
         <div class="t-title">${{escapeHtml(p['縣市'])}}${{escapeHtml(p['鄉鎮市區'])}}</div>
         <div class="t-row"><span>人口數</span><span>${{p['人口數'].toLocaleString('zh-TW')}}</span></div>
@@ -224,8 +290,18 @@ const districtLayer = L.geoJSON(DISTRICT_LAYER, {{
         <div class="t-row"><span>通訊處數(6家合計)</span><span>${{p['通訊處數']}}</span></div>
         <div class="t-row"><span>每萬人通訊處數</span><span>${{fmt(p['每萬人通訊處數'], {{decimals:2}})}}</span></div>
         <div style="margin-top:4px;color:var(--text-dim);">${{companies}}</div>
+        <div class="t-row" style="margin-top:4px;"><span>保戶數(當月)${{excludeInvestment ? '（不含投資型）' : ''}}</span><span>${{fmt(custField(p, '保戶數'), {{decimals:0}})}}</span></div>
+        <div class="t-row"><span>每萬人保戶數</span><span>${{fmt(custField(p, '每萬人保戶數'), {{decimals:2}})}}</span></div>
+        <div class="t-row"><span>保戶滲透率</span><span>${{fmt(custField(p, '保戶滲透率'), {{decimals:3}})}}%</span></div>
+        <div class="t-row"><span>總保費收入</span><span>${{fmt(custField(p, '總保費收入'), {{decimals:0}})}} 元</span></div>
+        <div class="t-row"><span>客單價</span><span>${{fmt(custField(p, '客單價'), {{decimals:0}})}} 元</span></div>
+        <div class="t-row"><span>主力通路</span><span>${{escapeHtml(channelLabel(custField(p, '主力通路')))}}${{主力通路占比 != null ? ' (' + fmt(主力通路占比 * 100, {{decimals:1}}) + '%)' : ''}}</span></div>
+        <div style="margin-top:2px;color:var(--text-dim);">${{
+          Object.entries(custField(p, '通路別保費') || {{}}).map(([k, v]) => `${{escapeHtml(k)}} ${{Math.round(v).toLocaleString('zh-TW')}}元`).join('、') || '無資料'
+        }}</div>
       </div>
-    `, {{ sticky: true }});
+    `;
+    }}, {{ sticky: true }});
   }},
 }}).addTo(map);
 
@@ -245,8 +321,8 @@ function featureStyle(feature) {{
   }}
 
   const metric = METRICS.find(m => m.id === currentMetricId);
-  const v = p[currentMetricId];
-  const fillColor = colorFor(v, currentBreaks, metric.diverging);
+  const v = custField(p, currentMetricId);
+  const fillColor = metric.categorical ? channelColor(v) : colorFor(v, currentBreaks, metric.diverging);
   if (!isFiltering) {{
     return {{ fillColor, fillOpacity: 0.55, weight: 0.6, color: 'rgba(255,255,255,0.6)' }};
   }}
@@ -258,7 +334,15 @@ function featureStyle(feature) {{
 
 function renderLegend(metric) {{
   const el = document.getElementById('district-legend');
-  if (metric.id === 'none' || !currentBreaks) {{ el.innerHTML = ''; return; }}
+  if (metric.id === 'none') {{ el.innerHTML = ''; return; }}
+  const investmentNote = (metric.group === '客戶實績' && excludeInvestment) ? '目前已排除投資型保單(變額壽險)。' : '';
+  if (metric.categorical) {{
+    const rows = [...Object.keys(CHANNEL_COLORS).map(c => [channelColor(c), channelLabel(c)]), [OTHER_CHANNEL_COLOR, OTHER_CHANNEL_LABEL], [NO_DATA_COLOR, '無資料']]
+      .map(([color, label]) => `<div class="legend-row"><span class="legend-swatch" style="background:${{color}}"></span>${{escapeHtml(label)}}</div>`).join('');
+    el.innerHTML = `<div class="legend-title">${{escapeHtml(metric.label)}}</div>${{rows}}<div class="legend-note">${{investmentNote}}滑鼠移到行政區上可看該區各通路的保費收入細項。</div>`;
+    return;
+  }}
+  if (!currentBreaks) {{ el.innerHTML = ''; return; }}
   const palette = metric.diverging ? DIVERGING_COLORS : SEQUENTIAL_COLORS;
   const edges = [null, ...currentBreaks, null];
   const rows = palette.map((color, i) => {{
@@ -272,16 +356,16 @@ function renderLegend(metric) {{
   const note = metric.diverging
     ? '滑鼠移到行政區上可看完整數據；斷點以 0 為中心對稱切(依資料最大絕對值的比例),灰色系中間色代表接近 0,深紅/深藍代表偏離 0 的兩端；淺灰代表無資料。'
     : '滑鼠移到行政區上可看完整數據；灰色代表無資料。';
-  el.innerHTML = `<div class="legend-title">${{escapeHtml(metric.label)}}</div>${{rows}}<div class="legend-note">${{note}}</div>`;
+  el.innerHTML = `<div class="legend-title">${{escapeHtml(metric.label)}}</div>${{rows}}<div class="legend-note">${{investmentNote}}${{note}}</div>`;
 }}
 
 function applyMetric(metricId) {{
   currentMetricId = metricId;
   const metric = METRICS.find(m => m.id === metricId);
-  if (metricId === 'none') {{
+  if (metricId === 'none' || metric.categorical) {{
     currentBreaks = null;
   }} else {{
-    const values = DISTRICT_LAYER.features.map(f => f.properties[metricId]);
+    const values = DISTRICT_LAYER.features.map(f => custField(f.properties, metricId));
     currentBreaks = metric.diverging ? divergingBreaks(values) : quantileBreaks(values);
   }}
   districtLayer.setStyle(featureStyle);
@@ -316,13 +400,19 @@ metricSelectEl.value = currentMetricId;
 metricSelectEl.addEventListener('change', (e) => applyMetric(e.target.value));
 applyMetric(currentMetricId);
 
+document.getElementById('excludeInvestmentToggle').addEventListener('change', (e) => {{
+  excludeInvestment = e.target.checked;
+  applyMetric(currentMetricId);
+  recomputeFilter();
+}});
+
 // ---- 複合篩選(白地候選):多個條件用 AND 組合,綜合任意指標(含各公司通訊處據點數)篩鄉鎮市區 ----
 
 function filterFieldValue(props, fieldId) {{
   if (fieldId.startsWith('company:')) {{
     return (props['通訊處數_by公司'] || {{}})[fieldId.slice('company:'.length)] || 0;
   }}
-  return props[fieldId];
+  return custField(props, fieldId);
 }}
 
 function readFilterConditions() {{
