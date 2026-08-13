@@ -3,3 +3,5 @@ playground.ipynb
 .claude/
 .DS_Store
 data/
+# build_panel.py 的 API 回應快取(48MB,重跑會重建)
+data/panel/raw/

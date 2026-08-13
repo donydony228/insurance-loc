@@ -2,10 +2,613 @@
 <html lang="zh-Hant">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="refresh" content="0; url=data/%E9%80%9A%E8%A8%8A%E8%99%95/dashboard.html">
-<title>保險通訊處選址儀表板</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>保險通訊處佈局 — 相關性試算</title>
+<style>
+  /* 色票沿用 dataviz skill palette.md 記錄的值,跟地圖儀表板同一套系統。
+     深色模式在 media query(跟系統設定)和 [data-theme](使用者切換)兩個 scope
+     各定義一次,兩個方向都要贏得過對方。 */
+  :root {
+    color-scheme: light;
+    --surface-1: #fcfcfb;
+    --plane: #f9f9f7;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #898781;
+    --grid: #e1e0d9;
+    --axis: #c3c2b7;
+    --border: rgba(11, 11, 11, 0.10);
+    --series-1: #2a78d6;
+    --warn: #fab219;
+    --warn-ink: #7a5200;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --surface-1: #1a1a19;
+      --plane: #0d0d0d;
+      --text-primary: #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted: #898781;
+      --grid: #2c2c2a;
+      --axis: #383835;
+      --border: rgba(255, 255, 255, 0.10);
+      --series-1: #3987e5;
+      --warn-ink: #fab219;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-1: #1a1a19;
+    --plane: #0d0d0d;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255, 255, 255, 0.10);
+    --series-1: #3987e5;
+    --warn-ink: #fab219;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--plane);
+    color: var(--text-primary);
+    font: 15px/1.6 system-ui, -apple-system, "Segoe UI", "PingFang TC", "Noto Sans TC", sans-serif;
+  }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 32px 24px 64px; }
+
+  header { margin-bottom: 24px; }
+  h1 { font-size: 28px; line-height: 1.3; margin: 0 0 8px; letter-spacing: -0.01em; }
+  .lede { color: var(--text-secondary); margin: 0; max-width: 60ch; }
+  .lede a, .footer-links a { color: var(--series-1); }
+
+  .card {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 24px;
+    margin-bottom: 16px;
+  }
+  .section-title {
+    font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--text-muted); margin: 0 0 12px;
+  }
+
+  .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 16px; }
+  label.field { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--text-secondary); }
+  select {
+    font: inherit; font-size: 14px; padding: 8px 10px;
+    background: var(--surface-1); color: var(--text-primary);
+    border: 1px solid var(--axis); border-radius: 6px; width: 100%;
+  }
+  .checks { display: flex; flex-wrap: wrap; gap: 20px; margin-top: 16px; }
+  .checks label { display: flex; gap: 8px; align-items: flex-start; font-size: 14px; color: var(--text-secondary); max-width: 46ch; }
+  .checks input { margin-top: 4px; flex-shrink: 0; }
+
+  .results { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 24px; align-items: start; }
+  .stat-label { font-size: 13px; color: var(--text-muted); margin-bottom: 2px; }
+  .stat-value { font-size: 30px; line-height: 1.2; letter-spacing: -0.02em; }
+  .stat-note { font-size: 13px; color: var(--text-secondary); margin-top: 2px; }
+
+  .notes { margin: 16px 0 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+  .notes li {
+    font-size: 13px; line-height: 1.5; color: var(--text-secondary);
+    padding-left: 26px; position: relative;
+  }
+  .notes li::before {
+    content: "!"; position: absolute; left: 0; top: 1px;
+    width: 18px; height: 18px; border-radius: 50%;
+    background: var(--warn); color: #3a2800;
+    font-size: 12px; font-weight: 700; line-height: 18px; text-align: center;
+  }
+
+  .chart-holder { overflow-x: auto; }
+  svg.scatter { display: block; width: 100%; height: auto; min-width: 520px; }
+  svg text { fill: var(--text-muted); font-size: 12px; }
+  svg text.axis-title { fill: var(--text-secondary); font-size: 13px; }
+  .gridline { stroke: var(--grid); stroke-width: 1; }
+  .axisline { stroke: var(--axis); stroke-width: 1; }
+  .dot { fill: var(--series-1); stroke: var(--surface-1); stroke-width: 2; }
+  .dot:hover { stroke: var(--text-primary); }
+  .fitline { stroke: var(--text-secondary); stroke-width: 2; stroke-linecap: round; opacity: 0.75; }
+
+  #tooltip {
+    position: fixed; pointer-events: none; opacity: 0; transition: opacity .1s;
+    background: var(--surface-1); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 8px 10px; font-size: 13px; line-height: 1.5;
+    box-shadow: 0 4px 14px rgba(0,0,0,.14); z-index: 10; white-space: nowrap;
+  }
+
+  details { margin-top: 8px; }
+  summary { cursor: pointer; font-size: 14px; color: var(--text-secondary); }
+  .table-holder { overflow-x: auto; max-height: 420px; margin-top: 12px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { text-align: right; padding: 6px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { position: sticky; top: 0; background: var(--surface-1); color: var(--text-muted);
+       font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
+  td:first-child, td:nth-child(2), th:first-child, th:nth-child(2) { text-align: left; }
+  td { font-variant-numeric: tabular-nums; }
+
+  .footer-links { font-size: 14px; color: var(--text-secondary); }
+  .status { color: var(--text-secondary); }
+</style>
 </head>
 <body>
-<p>正在導向儀表板... 如果沒有自動跳轉,<a href="data/%E9%80%9A%E8%A8%8A%E8%99%95/dashboard.html">請點這裡</a>。</p>
+<div class="wrap">
+
+<header>
+  <h1>保險通訊處佈局 — 相關性試算</h1>
+  <p class="lede">
+    選兩個指標,算它們的皮爾森相關係數。每一列資料是「某個地區的某一年」,
+    資料來自內政部戶政司、財政部與主計總處公開資料,加上六家壽險公司通訊處設立日期。
+  </p>
+</header>
+
+<div class="card">
+  <p class="section-title">選擇指標</p>
+  <div class="controls">
+    <label class="field">層級
+      <select id="level">
+        <option value="county">縣市(22 個)</option>
+        <option value="town">鄉鎮市區(368 個)</option>
+      </select>
+    </label>
+    <label class="field">X 軸指標<select id="xField"></select></label>
+    <label class="field">Y 軸指標<select id="yField"></select></label>
+    <label class="field">年份<select id="yearFilter"></select></label>
+    <label class="field">地區<select id="regionFilter"></select></label>
+  </div>
+  <div class="checks">
+    <label>
+      <input type="checkbox" id="diffMode">
+      <span>改用逐年變化量(一階差分)—— 兩個指標各自都有長期趨勢時,原始值算出來的相關會被「都跟年份有關」灌水,差分後看的是「一起變動」而非「一起漂移」。</span>
+    </label>
+  </div>
+</div>
+
+<div class="card">
+  <p class="section-title">結果</p>
+  <div class="results">
+    <div>
+      <div class="stat-label">皮爾森 r</div>
+      <div class="stat-value" id="pearson">—</div>
+      <div class="stat-note" id="pearsonNote"></div>
+    </div>
+    <div>
+      <div class="stat-label">斯皮爾曼 ρ(等級相關)</div>
+      <div class="stat-value" id="spearman">—</div>
+      <div class="stat-note">對離群值與偏態不敏感,跟 r 差很多代表關係不是線性的</div>
+    </div>
+    <div>
+      <div class="stat-label">樣本數 n</div>
+      <div class="stat-value" id="sampleN">—</div>
+      <div class="stat-note" id="sampleNote"></div>
+    </div>
+  </div>
+  <ul class="notes" id="notes"></ul>
+</div>
+
+<div class="card">
+  <p class="section-title">散佈圖</p>
+  <div class="chart-holder">
+    <svg class="scatter" id="scatter" viewBox="0 0 880 460" role="img" aria-labelledby="scatterTitle"></svg>
+  </div>
+  <details>
+    <summary>以表格檢視資料</summary>
+    <div class="table-holder"><table id="dataTable"></table></div>
+  </details>
+</div>
+
+<p class="footer-links">
+  下載原始資料:<a href="data/panel/panel_county.csv" download>縣市年度面板 CSV</a> ·
+  <a href="data/panel/panel_town.csv" download>鄉鎮市區年度面板 CSV</a><br>
+  也可以看 <a href="data/%E9%80%9A%E8%A8%8A%E8%99%95/dashboard.html">通訊處分布地圖儀表板</a>。
+</p>
+
+</div>
+<div id="tooltip" role="status" aria-live="polite"></div>
+
+<script>
+// ---------------------------------------------------------------- 欄位定義
+// 面板 CSV 的欄位名就是 id,這裡只補上顯示用的標籤/單位/小數位/分組。
+const FIELD_META = {
+  '新增通訊處數':        { label: '新增通訊處數(當年)', unit: ' 家', dec: 0, group: '通訊處' },
+  '累計通訊處數':        { label: '累計通訊處數(截至該年)', unit: ' 家', dec: 0, group: '通訊處' },
+  '每萬人通訊處數':      { label: '每萬人通訊處數', unit: '', dec: 2, group: '通訊處' },
+  '年底人口':            { label: '年底人口', unit: ' 人', dec: 0, group: '人口規模' },
+  '土地面積_km2':        { label: '土地面積(km²)', unit: ' km²', dec: 2, group: '人口規模' },
+  '人口密度_人每km2':    { label: '人口密度(人/km²)', unit: '', dec: 1, group: '人口規模' },
+  '戶數':                { label: '戶數', unit: ' 戶', dec: 0, group: '人口規模' },
+  '平均戶量':            { label: '平均戶量(人/戶)', unit: '', dec: 3, group: '人口規模' },
+  '出生數':              { label: '出生數(當年)', unit: ' 人', dec: 0, group: '生育與死亡' },
+  '粗出生率_千分比':     { label: '粗出生率(‰)', unit: '‰', dec: 2, group: '生育與死亡' },
+  '死亡數':              { label: '死亡數(當年)', unit: ' 人', dec: 0, group: '生育與死亡' },
+  '粗死亡率_千分比':     { label: '粗死亡率(‰)', unit: '‰', dec: 2, group: '生育與死亡' },
+  '自然增加率_千分比':   { label: '自然增加率(‰)', unit: '‰', dec: 2, group: '生育與死亡' },
+  '納稅單位_戶':         { label: '綜所稅納稅單位(戶)', unit: ' 戶', dec: 0, group: '所得與消費' },
+  '綜合所得總額_千元':   { label: '綜合所得總額(千元)', unit: ' 千元', dec: 0, group: '所得與消費' },
+  '綜合所得平均數_千元': { label: '綜合所得平均數(千元)', unit: ' 千元', dec: 1, group: '所得與消費' },
+  '綜合所得中位數_千元': { label: '綜合所得中位數(千元,僅鄉鎮市區層級)', unit: ' 千元', dec: 1, group: '所得與消費' },
+  '平均每戶消費支出_元': { label: '平均每戶消費支出(元,縣市值)', unit: ' 元', dec: 0, group: '所得與消費' },
+};
+const GROUP_ORDER = ['通訊處', '人口規模', '生育與死亡', '所得與消費'];
+
+const panels = {};        // level -> {rows, fields}
+let currentRows = [];
+
+// ---------------------------------------------------------------- 讀檔
+// 面板 CSV 沒有引號欄位(數字 + 不含逗號的地名),所以逐行 split 就夠,不用寫 CSV parser。
+function parseCSV(text) {
+  const lines = text.replace(/^﻿/, '').trim().split(/\r?\n/);
+  const header = lines[0].split(',');
+  return {
+    header,
+    rows: lines.slice(1).map(line => {
+      const parts = line.split(',');
+      const row = {};
+      header.forEach((h, i) => { row[h] = parts[i]; });
+      return row;
+    }),
+  };
+}
+
+async function loadPanel(level) {
+  if (panels[level]) return panels[level];
+  const file = level === 'county' ? 'data/panel/panel_county.csv' : 'data/panel/panel_town.csv';
+  const resp = await fetch(file);
+  if (!resp.ok) throw new Error(`讀不到 ${file}(HTTP ${resp.status})`);
+  const { header, rows } = parseCSV(await resp.text());
+  const keyCols = level === 'county' ? ['年', '縣市'] : ['年', '縣市', '鄉鎮市區'];
+  panels[level] = {
+    rows,
+    fields: header.filter(h => !keyCols.includes(h) && FIELD_META[h]),
+    regionOf: level === 'county' ? r => r['縣市'] : r => r['縣市'] + r['鄉鎮市區'],
+  };
+  return panels[level];
+}
+
+// ---------------------------------------------------------------- 統計
+function pearson(pairs) {
+  const n = pairs.length;
+  if (n < 3) return null;
+  const mx = pairs.reduce((s, p) => s + p[0], 0) / n;
+  const my = pairs.reduce((s, p) => s + p[1], 0) / n;
+  let sxy = 0, sxx = 0, syy = 0;
+  for (const [x, y] of pairs) {
+    const dx = x - mx, dy = y - my;
+    sxy += dx * dy; sxx += dx * dx; syy += dy * dy;
+  }
+  if (sxx === 0 || syy === 0) return null;   // 有一欄是常數,相關係數無定義
+  return sxy / Math.sqrt(sxx * syy);
+}
+
+// 平均等級處理同分,否則同分一多 ρ 會偏
+function ranks(values) {
+  const order = values.map((v, i) => [v, i]).sort((a, b) => a[0] - b[0]);
+  const out = new Array(values.length);
+  let i = 0;
+  while (i < order.length) {
+    let j = i;
+    while (j + 1 < order.length && order[j + 1][0] === order[i][0]) j++;
+    const avg = (i + j) / 2 + 1;
+    for (let k = i; k <= j; k++) out[order[k][1]] = avg;
+    i = j + 1;
+  }
+  return out;
+}
+
+function spearman(pairs) {
+  if (pairs.length < 3) return null;
+  const rx = ranks(pairs.map(p => p[0]));
+  const ry = ranks(pairs.map(p => p[1]));
+  return pearson(rx.map((v, i) => [v, ry[i]]));
+}
+
+// Fisher z 轉換求 p 值與臨界 r。n 夠大時足夠準,而且比實作 t 分布 CDF 短得多。
+function normalCDF(z) {
+  // Abramowitz & Stegun 7.1.26 的 erf 近似
+  const t = 1 / (1 + 0.3275911 * Math.abs(z) / Math.SQRT2);
+  const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t
+            + 0.254829592) * t * Math.exp(-z * z / 2);
+  return z >= 0 ? 0.5 * (1 + y) : 0.5 * (1 - y);
+}
+
+function significance(r, n) {
+  if (r === null || n < 5 || Math.abs(r) >= 1) return null;
+  const z = Math.atanh(r) * Math.sqrt(n - 3);
+  return { p: 2 * (1 - normalCDF(Math.abs(z))), critical: Math.tanh(1.96 / Math.sqrt(n - 3)) };
+}
+
+// ---------------------------------------------------------------- 取資料
+function num(v) {
+  if (v === undefined || v === '') return null;
+  const f = parseFloat(v);
+  return Number.isFinite(f) ? f : null;
+}
+
+/** 回傳 [{x, y, 年, 地區}],缺值成對排除。差分模式下先依地區分組、按年排序再取相鄰年差值。 */
+function buildPoints(rows, panel, xf, yf, diff) {
+  if (!diff) {
+    const out = [];
+    for (const r of rows) {
+      const x = num(r[xf]), y = num(r[yf]);
+      if (x !== null && y !== null) out.push({ x, y, year: r['年'], region: panel.regionOf(r) });
+    }
+    return out;
+  }
+  const byRegion = new Map();
+  for (const r of rows) {
+    const key = panel.regionOf(r);
+    if (!byRegion.has(key)) byRegion.set(key, []);
+    byRegion.get(key).push(r);
+  }
+  const out = [];
+  for (const [region, list] of byRegion) {
+    list.sort((a, b) => +a['年'] - +b['年']);
+    for (let i = 1; i < list.length; i++) {
+      // 只有連續兩年才能算變化量,中間斷年就跳過
+      if (+list[i]['年'] !== +list[i - 1]['年'] + 1) continue;
+      const x0 = num(list[i - 1][xf]), x1 = num(list[i][xf]);
+      const y0 = num(list[i - 1][yf]), y1 = num(list[i][yf]);
+      if (x0 === null || x1 === null || y0 === null || y1 === null) continue;
+      out.push({ x: x1 - x0, y: y1 - y0, year: list[i]['年'], region });
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------- 畫圖
+const SVG_NS = 'http://www.w3.org/2000/svg';
+function el(name, attrs, text) {
+  const node = document.createElementNS(SVG_NS, name);
+  for (const k in attrs) node.setAttribute(k, attrs[k]);
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+/** 刻度值與該用幾位小數。小數位跟著刻度間距走,不跟著欄位 —— 間距 200 就不該印 "1,400.0"。
+    每個刻度都先四捨五入到間距的精度,否則累加的浮點誤差會印出 "-0.00" 這種東西。*/
+function niceTicks(min, max, count) {
+  if (min === max) return { ticks: [min], dec: 0 };
+  const raw = (max - min) / count;
+  const mag = Math.pow(10, Math.floor(Math.log10(raw)));
+  const step = [1, 2, 2.5, 5, 10].find(s => s * mag >= raw) * mag;
+  const ticks = [];
+  for (let t = Math.ceil(min / step) * step; t <= max + step * 1e-9; t += step) {
+    ticks.push(parseFloat(t.toFixed(10)) + 0);   // +0 把 -0 正規化成 0
+  }
+  // 小數位取「剛好能無失真印出每個刻度」的位數。不能只看 step 的數量級:
+  // step=2.5 的數量級是 0 位,但印成整數會變成 -8/-5/-3,標籤跟格線位置對不上。
+  let dec = 0;
+  while (dec < 6 && ticks.some(t => Math.abs(parseFloat(t.toFixed(dec)) - t) > 1e-9)) dec++;
+  return { ticks, dec };
+}
+
+function fmt(v, dec) {
+  return v.toLocaleString('zh-TW', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+}
+
+const tooltip = document.getElementById('tooltip');
+
+function drawScatter(points, xf, yf, diff) {
+  const svg = document.getElementById('scatter');
+  svg.textContent = '';
+  const W = 880, H = 460, M = { top: 20, right: 24, bottom: 56, left: 88 };
+  const iw = W - M.left - M.right, ih = H - M.top - M.bottom;
+  const xm = FIELD_META[xf], ym = FIELD_META[yf];
+  const prefix = diff ? '逐年變化量:' : '';
+
+  svg.appendChild(el('title', { id: 'scatterTitle' },
+    `${prefix}${xm.label} 對 ${ym.label} 的散佈圖,共 ${points.length} 個資料點`));
+
+  if (points.length < 3) {
+    svg.appendChild(el('text', { x: W / 2, y: H / 2, 'text-anchor': 'middle' }, '資料點不足,無法繪圖'));
+    return;
+  }
+
+  const xs = points.map(p => p.x), ys = points.map(p => p.y);
+  const pad = (arr) => {
+    let lo = Math.min(...arr), hi = Math.max(...arr);
+    if (lo === hi) { lo -= 1; hi += 1; }
+    const m = (hi - lo) * 0.06;
+    return [lo - m, hi + m];
+  };
+  const [x0, x1] = pad(xs), [y0, y1] = pad(ys);
+  const sx = v => M.left + (v - x0) / (x1 - x0) * iw;
+  const sy = v => M.top + ih - (v - y0) / (y1 - y0) * ih;
+
+  // 格線 + 刻度(實線 hairline,recessive)
+  const yTicks = niceTicks(y0, y1, 6);
+  for (const t of yTicks.ticks) {
+    svg.appendChild(el('line', { class: 'gridline', x1: M.left, x2: M.left + iw, y1: sy(t), y2: sy(t) }));
+    svg.appendChild(el('text', { x: M.left - 10, y: sy(t) + 4, 'text-anchor': 'end' }, fmt(t, yTicks.dec)));
+  }
+  const xTicks = niceTicks(x0, x1, 6);
+  for (const t of xTicks.ticks) {
+    svg.appendChild(el('line', { class: 'gridline', x1: sx(t), x2: sx(t), y1: M.top, y2: M.top + ih }));
+    svg.appendChild(el('text', { x: sx(t), y: M.top + ih + 20, 'text-anchor': 'middle' }, fmt(t, xTicks.dec)));
+  }
+  // 差分模式的 0 基準線比其他格線重要,用軸線色標出來
+  if (diff) {
+    if (y0 < 0 && y1 > 0) svg.appendChild(el('line', { class: 'axisline', x1: M.left, x2: M.left + iw, y1: sy(0), y2: sy(0) }));
+    if (x0 < 0 && x1 > 0) svg.appendChild(el('line', { class: 'axisline', x1: sx(0), x2: sx(0), y1: M.top, y2: M.top + ih }));
+  }
+  svg.appendChild(el('line', { class: 'axisline', x1: M.left, x2: M.left + iw, y1: M.top + ih, y2: M.top + ih }));
+  svg.appendChild(el('line', { class: 'axisline', x1: M.left, x2: M.left, y1: M.top, y2: M.top + ih }));
+
+  svg.appendChild(el('text', { class: 'axis-title', x: M.left + iw / 2, y: H - 12, 'text-anchor': 'middle' },
+    prefix + xm.label));
+  const yTitle = el('text', { class: 'axis-title', x: 16, y: M.top + ih / 2, 'text-anchor': 'middle',
+    transform: `rotate(-90 16 ${M.top + ih / 2})` }, prefix + ym.label);
+  svg.appendChild(yTitle);
+
+  // 迴歸線是註記不是第二個序列,用次要文字色,讓資料點保有唯一的資料色
+  const r = pearson(points.map(p => [p.x, p.y]));
+  if (r !== null) {
+    const mx = xs.reduce((a, b) => a + b, 0) / xs.length;
+    const my = ys.reduce((a, b) => a + b, 0) / ys.length;
+    let sxy = 0, sxx = 0;
+    points.forEach(p => { sxy += (p.x - mx) * (p.y - my); sxx += (p.x - mx) ** 2; });
+    const slope = sxy / sxx, icpt = my - slope * mx;
+    const clamp = v => Math.max(y0, Math.min(y1, v));
+    svg.appendChild(el('line', { class: 'fitline',
+      x1: sx(x0), y1: sy(clamp(slope * x0 + icpt)),
+      x2: sx(x1), y2: sy(clamp(slope * x1 + icpt)) }));
+  }
+
+  for (const p of points) {
+    const dot = el('circle', { class: 'dot', cx: sx(p.x), cy: sy(p.y), r: 4.5 });
+    dot.addEventListener('mouseenter', ev => {
+      tooltip.innerHTML = `<strong>${p.year} 年 ${p.region}</strong><br>` +
+        `${xm.label}:${fmt(p.x, xm.dec)}${xm.unit}<br>` +
+        `${ym.label}:${fmt(p.y, ym.dec)}${ym.unit}`;
+      tooltip.style.opacity = '1';
+      tooltip.style.left = (ev.clientX + 14) + 'px';
+      tooltip.style.top = (ev.clientY + 14) + 'px';
+    });
+    dot.addEventListener('mouseleave', () => { tooltip.style.opacity = '0'; });
+    svg.appendChild(dot);
+  }
+}
+
+function drawTable(points, xf, yf) {
+  const t = document.getElementById('dataTable');
+  const xm = FIELD_META[xf], ym = FIELD_META[yf];
+  const head = `<thead><tr><th>年</th><th>地區</th><th>${xm.label}</th><th>${ym.label}</th></tr></thead>`;
+  const body = points.map(p =>
+    `<tr><td>${p.year}</td><td>${p.region}</td><td>${fmt(p.x, xm.dec)}</td><td>${fmt(p.y, ym.dec)}</td></tr>`
+  ).join('');
+  t.innerHTML = head + `<tbody>${body}</tbody>`;
+}
+
+// ---------------------------------------------------------------- 選單
+function buildFieldSelect(select, fields, selected) {
+  select.textContent = '';
+  for (const group of GROUP_ORDER) {
+    const inGroup = fields.filter(f => FIELD_META[f].group === group);
+    if (!inGroup.length) continue;
+    const og = document.createElement('optgroup');
+    og.label = group;
+    for (const f of inGroup) {
+      const o = document.createElement('option');
+      o.value = f;
+      o.textContent = FIELD_META[f].label;
+      og.appendChild(o);
+    }
+    select.appendChild(og);
+  }
+  if (selected && fields.includes(selected)) select.value = selected;
+}
+
+function buildFilterSelect(select, values, allLabel, selected) {
+  select.textContent = '';
+  const all = document.createElement('option');
+  all.value = '';
+  all.textContent = allLabel;
+  select.appendChild(all);
+  for (const v of values) {
+    const o = document.createElement('option');
+    o.value = v;
+    o.textContent = v;
+    select.appendChild(o);
+  }
+  if (selected && values.includes(selected)) select.value = selected;
+}
+
+// ---------------------------------------------------------------- 主流程
+const $ = id => document.getElementById(id);
+
+function renderNotes(points, panel, diff, yearFilter, regionFilter) {
+  const notes = [];
+  const n = points.length;
+  const years = new Set(points.map(p => p.year));
+  const regions = new Set(points.map(p => p.region));
+
+  if (n < 10) {
+    notes.push(`樣本只有 ${n} 筆,相關係數不具統計意義,只能當趨勢參考。`);
+  }
+  if (!diff && regions.size > 1 && years.size > 1) {
+    notes.push('這是「地區 × 年」的合併樣本:同一個地區在不同年份會重複出現,' +
+      '不是 ' + n + ' 個獨立觀測。r 值可以看,但顯著性(p 值)會被高估。');
+    notes.push('兩個指標若各自都隨年份單向漂移,相關係數會自然接近 ±1 —— ' +
+      '那只代表「都跟年份有關」。勾選上面的一階差分再算一次,結果差很多就是這種情況。');
+  }
+  if (regions.size > 1 && years.size > 1) {
+    notes.push('計數型指標(出生數、通訊處數、人口數)幾乎必然彼此高相關,因為大縣市什麼都大 —— ' +
+      '那是規模不是關係。想看真正的關聯,X/Y 至少有一個要用率型指標(粗出生率、每萬人通訊處數)。');
+  }
+  $('notes').innerHTML = notes.map(t => `<li>${t}</li>`).join('');
+}
+
+async function update() {
+  const level = $('level').value;
+  let panel;
+  try {
+    panel = await loadPanel(level);
+  } catch (err) {
+    $('pearsonNote').textContent = err.message + '(本頁需要透過網頁伺服器開啟,直接用 file:// 開會被瀏覽器擋掉)';
+    return;
+  }
+
+  // 換層級時保留使用者已選的欄位;中位數只有鄉鎮市區層級有,換到縣市會自動落回第一個選項
+  buildFieldSelect($('xField'), panel.fields, $('xField').value || '新增通訊處數');
+  buildFieldSelect($('yField'), panel.fields, $('yField').value || '粗出生率_千分比');
+
+  const years = [...new Set(panel.rows.map(r => r['年']))].sort((a, b) => +a - +b);
+  const regions = [...new Set(panel.rows.map(panel.regionOf))].sort((a, b) => a.localeCompare(b, 'zh-TW'));
+  buildFilterSelect($('yearFilter'), years, '全部年份', $('yearFilter').value);
+  buildFilterSelect($('regionFilter'), regions, '全部地區', $('regionFilter').value);
+
+  const xf = $('xField').value, yf = $('yField').value;
+  const diff = $('diffMode').checked;
+  const yearPick = $('yearFilter').value, regionPick = $('regionFilter').value;
+
+  let rows = panel.rows;
+  if (regionPick) rows = rows.filter(r => panel.regionOf(r) === regionPick);
+  // 差分要看相鄰兩年,年份篩選在差分之後套用,否則永遠算不出東西
+  if (yearPick && !diff) rows = rows.filter(r => r['年'] === yearPick);
+
+  let points = buildPoints(rows, panel, xf, yf, diff);
+  if (yearPick && diff) points = points.filter(p => p.year === yearPick);
+
+  currentRows = points;
+  const n = points.length;
+  const pairs = points.map(p => [p.x, p.y]);
+  const r = pearson(pairs);
+  const rho = spearman(pairs);
+  const sig = significance(r, n);
+
+  $('pearson').textContent = r === null ? '—' : r.toFixed(3);
+  $('spearman').textContent = rho === null ? '—' : rho.toFixed(3);
+  $('sampleN').textContent = n;
+
+  if (r === null) {
+    $('pearsonNote').textContent = n < 3 ? '有效資料點不足 3 筆' : '其中一個指標在這個範圍內沒有變異';
+  } else if (sig) {
+    const stars = sig.p < 0.001 ? 'p < 0.001' : `p ≈ ${sig.p.toFixed(3)}`;
+    $('pearsonNote').textContent = `${stars};此樣本數下 |r| 要大於 ${sig.critical.toFixed(3)} 才達 p<0.05`;
+  } else {
+    $('pearsonNote').textContent = '樣本太小,不計算 p 值';
+  }
+
+  const usedYears = [...new Set(points.map(p => p.year))].sort((a, b) => +a - +b);
+  $('sampleNote').textContent = usedYears.length
+    ? `實際使用 ${usedYears[0]}–${usedYears[usedYears.length - 1]} 年、` +
+      `${new Set(points.map(p => p.region)).size} 個地區(兩欄都有值才計入)`
+    : '兩個指標的年份範圍沒有交集';
+
+  renderNotes(points, panel, diff, yearPick, regionPick);
+  drawScatter(points, xf, yf, diff);
+  drawTable(points, xf, yf);
+}
+
+['level', 'xField', 'yField', 'yearFilter', 'regionFilter', 'diffMode']
+  .forEach(id => $(id).addEventListener('change', update));
+update();
+</script>
 </body>
 </html>
